@@ -67,6 +67,11 @@ async def commands():
                 "premium": False,
             },
             {
+                "name": "/config stats",
+                "description": "In-Discord dashboard: verifications, failure rate, and rate-limited users.",
+                "premium": False,
+            },
+            {
                 "name": "/customization",
                 "description": "Customize the embed title, body, footer, and image.",
                 "premium": True,

@@ -115,6 +115,18 @@ def _format_retry(seconds: int) -> str:
     return f"{minutes} minute{'s' if minutes != 1 else ''}"
 
 
+async def record_verification_event(guild_id: int, user_id: int, outcome: str) -> None:
+    """Record a verification outcome ('success' or 'failure') for admin stats."""
+    await db.verification_events.insert_one(
+        {
+            "guild_id": str(guild_id),
+            "user_id": str(user_id),
+            "outcome": outcome,
+            "ts": int(time.time()),
+        }
+    )
+
+
 async def has_admin_permission(interaction: discord.Interaction) -> bool:
     if interaction.user.guild_permissions.administrator:
         return True
@@ -211,6 +223,9 @@ class CaptchaModal(discord.ui.Modal, title="Server Verification"):
 
     async def on_submit(self, interaction: discord.Interaction):
         if self.answer.value.strip().upper() != self.code:
+            await record_verification_event(
+                interaction.guild_id, interaction.user.id, "failure"
+            )
             await interaction.response.send_message(
                 "Verification failed. The code you entered did not match. Click **Verify** again to retry with a new captcha.",
                 ephemeral=True,
@@ -255,6 +270,9 @@ class CaptchaModal(discord.ui.Modal, title="Server Verification"):
             return
 
         await increment_stat("users_verified", 1)
+        await record_verification_event(
+            interaction.guild_id, interaction.user.id, "success"
+        )
         # Clear this user's rate-limit window on success.
         await db.captcha_attempts.delete_one(
             {"_id": f"{interaction.guild_id}:{interaction.user.id}"}
@@ -465,6 +483,85 @@ async def config_panel(interaction: discord.Interaction):
     await interaction.response.send_message("Verification panel posted.", ephemeral=True)
 
 
+@config_group.command(
+    name="stats",
+    description="Show Authix verification stats for this server.",
+)
+async def config_stats(interaction: discord.Interaction):
+    if not await has_admin_permission(interaction):
+        await interaction.response.send_message(
+            "You don't have permission to use this command.", ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    now = int(time.time())
+    week_ago = now - 7 * 24 * 3600
+    day_ago = now - 24 * 3600
+    hour_ago = now - RATE_LIMIT_WINDOW
+    gid = str(interaction.guild_id)
+
+    # Weekly + daily counts
+    week_success = await db.verification_events.count_documents(
+        {"guild_id": gid, "outcome": "success", "ts": {"$gte": week_ago}}
+    )
+    week_failure = await db.verification_events.count_documents(
+        {"guild_id": gid, "outcome": "failure", "ts": {"$gte": week_ago}}
+    )
+    day_success = await db.verification_events.count_documents(
+        {"guild_id": gid, "outcome": "success", "ts": {"$gte": day_ago}}
+    )
+    day_failure = await db.verification_events.count_documents(
+        {"guild_id": gid, "outcome": "failure", "ts": {"$gte": day_ago}}
+    )
+
+    week_total = week_success + week_failure
+    failure_rate = (
+        f"{(week_failure / week_total * 100):.1f}%" if week_total else "—"
+    )
+
+    # Currently rate-limited users in this guild
+    rate_limited = 0
+    async for doc in db.captcha_attempts.find({"_id": {"$regex": f"^{gid}:"}}):
+        recent = [t for t in doc.get("attempts", []) if t > hour_ago]
+        if len(recent) >= RATE_LIMIT_MAX:
+            rate_limited += 1
+
+    embed = discord.Embed(
+        title="Authix — Server Stats",
+        description=f"Verification activity in **{interaction.guild.name}**.",
+        color=0x00D2FF,
+    )
+    embed.add_field(
+        name="Last 24 hours",
+        value=(
+            f"✅ `{day_success}` verified\n"
+            f"❌ `{day_failure}` failed"
+        ),
+        inline=True,
+    )
+    embed.add_field(
+        name="Last 7 days",
+        value=(
+            f"✅ `{week_success}` verified\n"
+            f"❌ `{week_failure}` failed\n"
+            f"📉 Failure rate: `{failure_rate}`"
+        ),
+        inline=True,
+    )
+    embed.add_field(
+        name="Right now",
+        value=(
+            f"🚧 `{rate_limited}` user{'s' if rate_limited != 1 else ''} "
+            f"rate-limited (3/hour cap)"
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="Powered by Authix")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
 bot.tree.add_command(config_group)
 
 
@@ -532,7 +629,8 @@ async def help_cmd(interaction: discord.Interaction):
         description=(
             "**1.** `/config role verified_role:@Verified` — set the role users receive after passing captcha.\n"
             "**2.** `/config admin role:@Moderators action:add` — let a role manage Authix.\n"
-            "**3.** `/config panel` — post the verification panel in the current channel.\n\n"
+            "**3.** `/config panel` — post the verification panel in the current channel.\n"
+            "**4.** `/config stats` — in-Discord dashboard of verifications, failures, and rate-limited users.\n\n"
             "**Premium**\n"
             "• `/customization` — custom embed title, body, footer, and image."
         ),
