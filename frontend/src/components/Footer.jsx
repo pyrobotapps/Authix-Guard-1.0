@@ -36,9 +36,25 @@ export default function Footer() {
           <span className="mono text-xs uppercase tracking-[0.2em] text-zinc-600">
             © {new Date().getFullYear()} Authix · All rights reserved
           </span>
-          <span className="mono text-xs uppercase tracking-[0.2em] text-zinc-600">
-            Built for Discord · Powered by humans
-          </span>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <Link
+              to="/privacy"
+              data-testid="footer-link-privacy"
+              className="mono text-xs uppercase tracking-[0.2em] text-zinc-500 hover:text-white transition-colors"
+            >
+              Privacy
+            </Link>
+            <Link
+              to="/terms"
+              data-testid="footer-link-terms"
+              className="mono text-xs uppercase tracking-[0.2em] text-zinc-500 hover:text-white transition-colors"
+            >
+              Terms
+            </Link>
+            <span className="mono text-xs uppercase tracking-[0.2em] text-zinc-600">
+              Built for Discord · Powered by humans
+            </span>
+          </div>
         </div>
       </div>
     </footer>
