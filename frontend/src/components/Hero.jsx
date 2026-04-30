@@ -53,9 +53,9 @@ export default function Hero() {
             data-testid="hero-subtitle"
             className="max-w-2xl text-zinc-400 text-base sm:text-lg leading-relaxed mono"
           >
-            Authix secures your Discord server with letter-based captcha verification,
-            role-scoped access control, and premium embed customization — all wired into
-            Discord&apos;s native monetization.
+            Authix secures your Discord server with image-based captcha verification
+            (letters + numbers), role-scoped access control, and premium embed
+            customization — all wired into Discord&apos;s native monetization.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 mt-2">

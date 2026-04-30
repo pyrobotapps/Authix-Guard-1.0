@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { SectionHeader } from "@/components/Features";
-import { ShieldCheck, CheckCircle2, ArrowRight } from "lucide-react";
+import { ShieldCheck, CheckCircle2, ArrowRight, RefreshCw } from "lucide-react";
+import CaptchaImage from "@/components/CaptchaImage";
 
 const steps = [
   {
@@ -11,12 +12,12 @@ const steps = [
   {
     step: "02",
     title: "Click Verify",
-    body: "Authix opens a native Discord modal — no browser, no OAuth pop-ups.",
+    body: "Authix generates a unique distorted captcha image — letters and numbers, bot-hostile by design.",
   },
   {
     step: "03",
     title: "Solve captcha",
-    body: "A letter-based code is generated just for them. Simple, readable, bot-hostile.",
+    body: "User reads the characters from the image and types them into a Discord modal.",
   },
   {
     step: "04",
@@ -25,12 +26,29 @@ const steps = [
   },
 ];
 
+const DEMO_CODE = "A7KP5N";
+
 export default function HowItWorks() {
   const [verified, setVerified] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  const [code] = useState("KPXZQN");
+  const [code, setCode] = useState(DEMO_CODE);
   const [input, setInput] = useState("");
   const [err, setErr] = useState("");
+
+  const newCode = () => {
+    const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    let c = "";
+    for (let i = 0; i < 6; i++)
+      c += alphabet[Math.floor(Math.random() * alphabet.length)];
+    setCode(c);
+    setInput("");
+    setErr("");
+  };
+
+  const openModal = () => {
+    newCode();
+    setShowModal(true);
+  };
 
   const onSubmit = (e) => {
     e.preventDefault();
@@ -124,7 +142,7 @@ export default function HowItWorks() {
                     ) : (
                       <button
                         data-testid="mockup-verify-button"
-                        onClick={() => setShowModal(true)}
+                        onClick={openModal}
                         className="mono text-sm font-bold px-4 py-2 rounded-md bg-[#5865F2] hover:bg-[#4752C4] text-white flex items-center gap-2 transition-colors"
                       >
                         <ShieldCheck size={16} /> Verify
@@ -151,24 +169,35 @@ export default function HowItWorks() {
             className="authix-card max-w-md w-full p-7"
           >
             <div className="mono text-xs uppercase tracking-[0.2em] text-[#00E5FF] mb-2">
-              Discord · Modal
+              Discord · Captcha
             </div>
             <h3 className="chivo text-2xl font-black mb-1">Server Verification</h3>
             <p className="mono text-sm text-zinc-400 mb-6">
-              Enter the code below exactly as shown.
+              Read the characters from the image and type them below.
             </p>
 
             <div className="mb-5">
-              <div className="mono text-xs uppercase tracking-[0.2em] text-zinc-500 mb-2">
-                Your code
+              <div className="flex items-center justify-between mb-2">
+                <div className="mono text-xs uppercase tracking-[0.2em] text-zinc-500">
+                  Captcha image
+                </div>
+                <button
+                  type="button"
+                  data-testid="mockup-captcha-refresh"
+                  onClick={newCode}
+                  className="mono text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-[#00E5FF] flex items-center gap-1 transition-colors"
+                  aria-label="Generate new captcha"
+                >
+                  <RefreshCw size={11} /> New code
+                </button>
               </div>
-              <div className="chivo text-4xl font-black tracking-[0.5em] text-[#00E5FF] authix-glow-text text-center py-4 bg-black/50 rounded-lg border border-white/10">
-                {code}
+              <div data-testid="mockup-captcha-image">
+                <CaptchaImage code={code} height={120} />
               </div>
             </div>
 
             <label className="mono text-xs uppercase tracking-[0.2em] text-zinc-400">
-              Type the code
+              Type what you see
             </label>
             <input
               autoFocus

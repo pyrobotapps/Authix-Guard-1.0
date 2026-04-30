@@ -27,7 +27,7 @@ export default function Premium() {
             </div>
             <ul className="space-y-3 mono text-sm text-zinc-300">
               {[
-                "Letter-based captcha verification",
+                "Image-based captcha (letters + numbers)",
                 "Verified & unverified role management",
                 "`/config admin` role hierarchy",
                 "Persistent verification panel",

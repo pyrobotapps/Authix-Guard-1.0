@@ -3,6 +3,7 @@ Authix - Discord Verification & Security Bot
 Letter-based captcha verification, role management, premium customization via Discord Monetization.
 """
 import os
+import io
 import random
 import string
 import logging
@@ -15,6 +16,7 @@ from discord import app_commands
 from discord.ext import commands
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
+from captcha.image import ImageCaptcha
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -89,9 +91,21 @@ def has_premium_entitlement(interaction: discord.Interaction) -> bool:
 
 
 def generate_captcha_code(length: int = 6) -> str:
-    # Letters only, excluding visually ambiguous characters
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+    # Letters + digits, excluding visually ambiguous characters (0/O, 1/I/L)
+    alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
     return "".join(random.choices(alphabet, k=length))
+
+
+# Reusable captcha image renderer
+_captcha_image = ImageCaptcha(width=360, height=120)
+
+
+def generate_captcha_image(code: str) -> io.BytesIO:
+    """Render a distorted captcha image (PNG) containing the code."""
+    data = _captcha_image.generate(code, format="png")
+    buf = io.BytesIO(data.read() if hasattr(data, "read") else data)
+    buf.seek(0)
+    return buf
 
 
 # ---- Bot ----
@@ -141,8 +155,8 @@ class CaptchaModal(discord.ui.Modal, title="Server Verification"):
         super().__init__(timeout=120)
         self.code = code
         self.answer = discord.ui.TextInput(
-            label=f"Enter this code: {code}",
-            placeholder="Type the code exactly as shown",
+            label="Enter the code from the image above",
+            placeholder="Type the characters you see",
             min_length=len(code),
             max_length=len(code) + 2,
             required=True,
@@ -152,7 +166,7 @@ class CaptchaModal(discord.ui.Modal, title="Server Verification"):
     async def on_submit(self, interaction: discord.Interaction):
         if self.answer.value.strip().upper() != self.code:
             await interaction.response.send_message(
-                "Verification failed. The code you entered did not match. Please try again.",
+                "Verification failed. The code you entered did not match. Click **Verify** again to retry with a new captcha.",
                 ephemeral=True,
             )
             return
@@ -201,6 +215,33 @@ class CaptchaModal(discord.ui.Modal, title="Server Verification"):
         )
 
 
+class EnterCodeView(discord.ui.View):
+    """Non-persistent view attached to a per-user ephemeral captcha image."""
+
+    def __init__(self, code: str, owner_id: int):
+        super().__init__(timeout=180)  # 3 min to solve
+        self.code = code
+        self.owner_id = owner_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                "This captcha isn't for you.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(
+        label="Enter Code",
+        style=discord.ButtonStyle.success,
+        emoji="🔑",
+    )
+    async def enter_code(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        await interaction.response.send_modal(CaptchaModal(self.code))
+
+
 # ---- Verify Button (persistent) ----
 class VerifyView(discord.ui.View):
     def __init__(self):
@@ -224,8 +265,26 @@ class VerifyView(discord.ui.View):
                 )
                 return
 
+        # Generate image captcha and send it ephemerally to the user
         code = generate_captcha_code()
-        await interaction.response.send_modal(CaptchaModal(code))
+        image_buf = await asyncio.to_thread(generate_captcha_image, code)
+        file = discord.File(image_buf, filename="captcha.png")
+
+        embed = discord.Embed(
+            title="Solve the captcha to verify",
+            description=(
+                "Type the characters shown in the image below, then click **Enter Code**.\n"
+                "Codes are case-insensitive. This captcha expires in 3 minutes."
+            ),
+            color=0x00D2FF,
+        )
+        embed.set_image(url="attachment://captcha.png")
+        embed.set_footer(text="Powered by Authix")
+
+        view = EnterCodeView(code=code, owner_id=interaction.user.id)
+        await interaction.response.send_message(
+            embed=embed, file=file, view=view, ephemeral=True
+        )
 
 
 # ---- /config group ----

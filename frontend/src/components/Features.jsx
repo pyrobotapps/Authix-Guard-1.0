@@ -12,7 +12,7 @@ const items = [
     icon: ShieldCheck,
     title: "Captcha Verification",
     body:
-      "Letter-based codes delivered via Discord's native modal. No third-party redirects, no leaky OAuth — just a clean in-server challenge.",
+      "Image-based captcha with distorted letters and numbers, delivered inside Discord — no third-party redirects, no leaky OAuth. Just a clean in-server challenge.",
     size: "lg:col-span-2",
     accent: true,
   },
