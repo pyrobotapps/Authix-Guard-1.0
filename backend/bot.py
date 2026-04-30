@@ -4,6 +4,7 @@ Letter-based captcha verification, role management, premium customization via Di
 """
 import os
 import io
+import time
 import random
 import string
 import logging
@@ -67,6 +68,51 @@ async def increment_stat(key: str, inc: int = 1) -> None:
     await db.authix_stats.update_one(
         {"_id": "global"}, {"$inc": {key: inc}}, upsert=True
     )
+
+
+# ---- Rate limit ----
+RATE_LIMIT_MAX = 3           # attempts
+RATE_LIMIT_WINDOW = 3600     # seconds (1 hour)
+
+
+async def check_and_record_attempt(guild_id: int, user_id: int) -> tuple[bool, int, int]:
+    """
+    Returns (allowed, remaining_after, retry_after_seconds).
+
+    - allowed=True  -> the attempt was recorded; remaining_after is the remaining attempts
+                       the user has left in the current window (after this one).
+    - allowed=False -> the user is over the limit; retry_after_seconds tells them when
+                       the oldest attempt in the window expires.
+    """
+    now = int(time.time())
+    cutoff = now - RATE_LIMIT_WINDOW
+    key = f"{guild_id}:{user_id}"
+
+    doc = await db.captcha_attempts.find_one({"_id": key}, {"_id": 0, "attempts": 1})
+    attempts = [t for t in (doc or {}).get("attempts", []) if t > cutoff]
+
+    if len(attempts) >= RATE_LIMIT_MAX:
+        oldest = min(attempts)
+        retry_after = max(1, (oldest + RATE_LIMIT_WINDOW) - now)
+        # Persist the pruned list so the doc doesn't grow forever
+        await db.captcha_attempts.update_one(
+            {"_id": key}, {"$set": {"attempts": attempts}}, upsert=True
+        )
+        return False, 0, retry_after
+
+    attempts.append(now)
+    await db.captcha_attempts.update_one(
+        {"_id": key}, {"$set": {"attempts": attempts}}, upsert=True
+    )
+    return True, RATE_LIMIT_MAX - len(attempts), 0
+
+
+def _format_retry(seconds: int) -> str:
+    minutes = (seconds + 59) // 60
+    if minutes >= 60:
+        hours = minutes // 60
+        return f"{hours} hour{'s' if hours != 1 else ''}"
+    return f"{minutes} minute{'s' if minutes != 1 else ''}"
 
 
 async def has_admin_permission(interaction: discord.Interaction) -> bool:
@@ -209,6 +255,10 @@ class CaptchaModal(discord.ui.Modal, title="Server Verification"):
             return
 
         await increment_stat("users_verified", 1)
+        # Clear this user's rate-limit window on success.
+        await db.captcha_attempts.delete_one(
+            {"_id": f"{interaction.guild_id}:{interaction.user.id}"}
+        )
         await interaction.response.send_message(
             f"You're verified. Welcome to **{guild.name}**.",
             ephemeral=True,
@@ -265,6 +315,19 @@ class VerifyView(discord.ui.View):
                 )
                 return
 
+        # Rate limit: max 3 captcha attempts per user per hour per guild.
+        allowed, remaining, retry_after = await check_and_record_attempt(
+            interaction.guild_id, interaction.user.id
+        )
+        if not allowed:
+            await interaction.response.send_message(
+                f"You've reached the verification attempt limit "
+                f"({RATE_LIMIT_MAX} per hour). Please try again in "
+                f"**{_format_retry(retry_after)}**.",
+                ephemeral=True,
+            )
+            return
+
         # Generate image captcha and send it ephemerally to the user
         code = generate_captcha_code()
         image_buf = await asyncio.to_thread(generate_captcha_image, code)
@@ -279,7 +342,8 @@ class VerifyView(discord.ui.View):
             color=0x00D2FF,
         )
         embed.set_image(url="attachment://captcha.png")
-        embed.set_footer(text="Powered by Authix")
+        footer = f"Powered by Authix · {remaining} attempt{'s' if remaining != 1 else ''} left this hour"
+        embed.set_footer(text=footer)
 
         view = EnterCodeView(code=code, owner_id=interaction.user.id)
         await interaction.response.send_message(
