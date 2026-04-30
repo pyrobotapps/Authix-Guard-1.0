@@ -143,7 +143,7 @@ const sections = [
       <>
         <p>
           Questions, deletion requests, or security reports:{" "}
-          <strong>support@authix.app</strong>.
+          <strong>windsbyj@gmail.com</strong>.
         </p>
       </>
     ),

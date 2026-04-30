@@ -166,7 +166,7 @@ const sections = [
     body: (
       <>
         <p>
-          Questions about these Terms: <strong>support@authix.app</strong>.
+          Questions about these Terms: <strong>windsbyj@gmail.com</strong>.
         </p>
       </>
     ),
