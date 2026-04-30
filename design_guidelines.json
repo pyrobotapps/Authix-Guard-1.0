@@ -1,0 +1,93 @@
+{
+  "project_name": "Authix Discord Bot Landing Page",
+  "theme": "Dark",
+  "archetype": "Archetype 7 (Electric & Neon) fused with Archetype 4 (Swiss & High-Contrast)",
+  "mood_and_tone": {
+    "description": "Secure, trustworthy, intelligent system, premium product, controlled access. Professional SaaS-style with a futuristic, clean tech aesthetic.",
+    "avoid": ["cartoonish", "overly complex", "random bright colors", "messy designs"]
+  },
+  "typography": {
+    "strategy": "The 'Swiss Brutalist' Tech Fusion",
+    "fonts": {
+      "heading": "Chivo",
+      "body": "JetBrains Mono",
+      "fallbacks": "sans-serif"
+    },
+    "scales": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl font-black tracking-tighter leading-none",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight",
+      "h3": "text-xl sm:text-2xl font-bold tracking-tight",
+      "h4": "text-lg sm:text-xl font-bold",
+      "body": "text-base leading-relaxed tracking-normal",
+      "overline": "text-xs font-bold uppercase tracking-[0.2em]"
+    }
+  },
+  "colors": {
+    "primary": {
+      "cyan": "#00D2FF",
+      "blue": "#007AFF",
+      "teal": "#00E5FF"
+    },
+    "backgrounds": {
+      "void_black": "#050505",
+      "matte_charcoal": "#0F0F12",
+      "glass": "rgba(15, 15, 18, 0.7)"
+    },
+    "borders": {
+      "subtle": "rgba(255, 255, 255, 0.08)",
+      "active": "rgba(0, 210, 255, 0.3)"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A1A1AA",
+      "muted": "#71717A"
+    }
+  },
+  "layout_and_spacing": {
+    "strategy": "The 'Control Room' Grid & Generous Spacing",
+    "container": "max-w-7xl mx-auto px-6 sm:px-8 lg:px-12",
+    "section_padding": "py-24 sm:py-32",
+    "bento_grid": "grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6"
+  },
+  "surfaces_and_micro_themes": {
+    "cards": {
+      "style": "Retro-Futurism fused with Glassmorphism",
+      "classes": "bg-matte_charcoal border border-white/5 rounded-2xl p-8 hover:border-[#00D2FF]/30 transition-colors duration-300 relative overflow-hidden group",
+      "effects": "Subtle neon cyan glow on hover via radial gradient pseudo-element"
+    },
+    "header": {
+      "style": "Glassmorphism (The Crystal Variant)",
+      "classes": "fixed top-0 w-full z-50 bg-[#050505]/60 backdrop-blur-xl border-b border-white/10"
+    },
+    "buttons": {
+      "primary": "bg-gradient-to-r from-[#007AFF] to-[#00E5FF] text-white font-bold py-3 px-6 rounded-lg shadow-[0_0_20px_rgba(0,210,255,0.4)] hover:shadow-[0_0_30px_rgba(0,210,255,0.6)] transition-all",
+      "secondary": "bg-white/5 text-white border border-white/10 hover:bg-white/10 font-bold py-3 px-6 rounded-lg transition-all"
+    }
+  },
+  "components_strategy": {
+    "hero_section": "Massive H1 title, neon glowing primary CTA, dynamic abstract network background behind a dark overlay, floating stats or trust badges (e.g., 'Trusted by 10k+ Servers').",
+    "features_bento": "Asymmetrical grid. Highlight Captcha Verification, Role Management, and Admin Controls. Use Lucide icons (Shield, Lock, Key, Settings) heavily.",
+    "how_it_works": "Step-by-step visual flow. Simulated Discord UI mockup for the captcha modal.",
+    "premium_tier": "Distinct styling (maybe a subtle gold/cyan mix) showcasing the /customization feature for embeds. Highlight 'Monetized via Discord'.",
+    "footer": "Massive bottom space. Clean links to Docs, Support, Discord."
+  },
+  "media": {
+    "icons_library": "lucide-react",
+    "images": {
+      "hero_bg": {
+        "url": "https://images.unsplash.com/photo-1638356554489-decb2e3a4c37?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwxfHxjeWJlcnNlY3VyaXR5JTIwbmV0d29yayUyMG5vZGUlMjBhYnN0cmFjdCUyMGRhcmslMjBjeWFufGVufDB8fHx8MTc3NzU4NTE3MHww&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract blue light streaks in dark, used for hero section background with heavy dark overlay",
+        "usage": "Hero section background (`bg-cover`, `bg-center`, under a `bg-black/80` overlay)"
+      },
+      "premium_feature_bg": {
+        "url": "https://images.unsplash.com/photo-1639322537228-f710d846310a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwyfHxjeWJlcnNlY3VyaXR5JTIwbmV0d29yayUyMG5vZGUlMjBhYnN0cmFjdCUyMGRhcmslMjBjeWFufGVufDB8fHx8MTc3NzU4NTE3MHww&ixlib=rb-4.1.0&q=85",
+        "description": "Geometric dark cubes representing structured data and premium customization.",
+        "usage": "Background for the Premium Customization feature block."
+      }
+    }
+  },
+  "accessibility_and_motion": {
+    "testing_attributes": "All interactive elements MUST include `data-testid` (e.g., `data-testid=\"add-to-discord-button\"`).",
+    "motion": "Use Framer Motion for scroll-triggered entrance animations (fade up). Buttons must have explicit focus states (e.g., `focus:ring-2 focus:ring-[#00E5FF]`)."
+  }
+}
