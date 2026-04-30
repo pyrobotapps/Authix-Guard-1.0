@@ -9,12 +9,13 @@ import random
 import string
 import logging
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from captcha.image import ImageCaptcha
@@ -47,6 +48,8 @@ async def get_guild_config(guild_id: int) -> dict:
             "verified_role_id": None,
             "unverified_role_id": None,
             "admin_role_ids": [],
+            "digest_channel_id": None,
+            "last_digest_ts": None,
             "embed": {
                 "title": "Server Verification",
                 "body": "Click the button below and solve the captcha to gain access to this server.",
@@ -187,6 +190,62 @@ async def on_ready():
         {"$set": {"servers_protected": len(bot.guilds)}},
         upsert=True,
     )
+    if not weekly_digest_loop.is_running():
+        weekly_digest_loop.start()
+
+
+# ---- Weekly digest ----
+# Fires every 30 min. Posts once per guild whose digest_channel_id is set,
+# when the current UTC time is Monday 09:xx and the last digest was > 6 days ago.
+@tasks.loop(minutes=30)
+async def weekly_digest_loop():
+    now_dt = datetime.now(timezone.utc)
+    if now_dt.weekday() != 0 or now_dt.hour != 9:
+        return
+
+    now_ts = int(now_dt.timestamp())
+    six_days = 6 * 24 * 3600
+
+    async for cfg in db.guild_configs.find(
+        {"digest_channel_id": {"$ne": None}}, {"_id": 0}
+    ):
+        guild_id = int(cfg["guild_id"])
+        channel_id = int(cfg["digest_channel_id"])
+        last_ts = cfg.get("last_digest_ts") or 0
+        if now_ts - last_ts < six_days:
+            continue
+
+        guild = bot.get_guild(guild_id)
+        if not guild:
+            continue
+        channel = guild.get_channel(channel_id)
+        if not channel:
+            log.warning("Digest channel missing for guild %s", guild_id)
+            continue
+
+        try:
+            embed = await build_stats_embed(
+                guild_id, guild.name, title_prefix="📊 Weekly Digest — "
+            )
+            await channel.send(embed=embed)
+            await db.guild_configs.update_one(
+                {"guild_id": str(guild_id)},
+                {"$set": {"last_digest_ts": now_ts}},
+            )
+            log.info("Posted weekly digest to guild %s / channel %s", guild_id, channel_id)
+        except discord.Forbidden:
+            log.warning(
+                "Missing permissions to post digest in guild %s / channel %s",
+                guild_id,
+                channel_id,
+            )
+        except Exception as e:
+            log.exception("Digest post failed for guild %s: %s", guild_id, e)
+
+
+@weekly_digest_loop.before_loop
+async def _before_digest_loop():
+    await bot.wait_until_ready()
 
 
 @bot.event
@@ -495,14 +554,20 @@ async def config_stats(interaction: discord.Interaction):
         return
 
     await interaction.response.defer(ephemeral=True, thinking=True)
+    embed = await build_stats_embed(interaction.guild_id, interaction.guild.name)
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
+
+async def build_stats_embed(
+    guild_id: int, guild_name: str, *, title_prefix: str = ""
+) -> discord.Embed:
+    """Compute Authix stats for a guild and return a reusable embed."""
     now = int(time.time())
     week_ago = now - 7 * 24 * 3600
     day_ago = now - 24 * 3600
     hour_ago = now - RATE_LIMIT_WINDOW
-    gid = str(interaction.guild_id)
+    gid = str(guild_id)
 
-    # Weekly + daily counts
     week_success = await db.verification_events.count_documents(
         {"guild_id": gid, "outcome": "success", "ts": {"$gte": week_ago}}
     )
@@ -521,24 +586,21 @@ async def config_stats(interaction: discord.Interaction):
         f"{(week_failure / week_total * 100):.1f}%" if week_total else "—"
     )
 
-    # Currently rate-limited users in this guild
     rate_limited = 0
     async for doc in db.captcha_attempts.find({"_id": {"$regex": f"^{gid}:"}}):
         recent = [t for t in doc.get("attempts", []) if t > hour_ago]
         if len(recent) >= RATE_LIMIT_MAX:
             rate_limited += 1
 
+    title = f"{title_prefix}Authix — Server Stats" if title_prefix else "Authix — Server Stats"
     embed = discord.Embed(
-        title="Authix — Server Stats",
-        description=f"Verification activity in **{interaction.guild.name}**.",
+        title=title,
+        description=f"Verification activity in **{guild_name}**.",
         color=0x00D2FF,
     )
     embed.add_field(
         name="Last 24 hours",
-        value=(
-            f"✅ `{day_success}` verified\n"
-            f"❌ `{day_failure}` failed"
-        ),
+        value=f"✅ `{day_success}` verified\n❌ `{day_failure}` failed",
         inline=True,
     )
     embed.add_field(
@@ -559,7 +621,54 @@ async def config_stats(interaction: discord.Interaction):
         inline=False,
     )
     embed.set_footer(text="Powered by Authix")
-    await interaction.followup.send(embed=embed, ephemeral=True)
+    return embed
+
+
+@config_group.command(
+    name="digest",
+    description="Set a channel to receive a weekly stats digest (Monday ~9:00 UTC).",
+)
+@app_commands.describe(
+    channel="Channel to post the weekly digest in. Leave empty to disable.",
+)
+async def config_digest(
+    interaction: discord.Interaction,
+    channel: Optional[discord.TextChannel] = None,
+):
+    if not await has_admin_permission(interaction):
+        await interaction.response.send_message(
+            "You don't have permission to use this command.", ephemeral=True
+        )
+        return
+
+    cfg = await get_guild_config(interaction.guild_id)
+
+    if channel is None:
+        cfg["digest_channel_id"] = None
+        await save_guild_config(interaction.guild_id, cfg)
+        await interaction.response.send_message(
+            "Weekly digest disabled.", ephemeral=True
+        )
+        return
+
+    # Verify the bot can send messages + embed links in the target channel.
+    me = interaction.guild.me
+    perms = channel.permissions_for(me)
+    if not (perms.send_messages and perms.embed_links):
+        await interaction.response.send_message(
+            f"I can't post in {channel.mention}. Please grant me **Send Messages** and "
+            "**Embed Links** there, then try again.",
+            ephemeral=True,
+        )
+        return
+
+    cfg["digest_channel_id"] = str(channel.id)
+    await save_guild_config(interaction.guild_id, cfg)
+    await interaction.response.send_message(
+        f"Weekly digest will be posted in {channel.mention} every **Monday around 09:00 UTC**. "
+        "The first digest will arrive on the next scheduled run.",
+        ephemeral=True,
+    )
 
 
 bot.tree.add_command(config_group)
@@ -630,7 +739,8 @@ async def help_cmd(interaction: discord.Interaction):
             "**1.** `/config role verified_role:@Verified` — set the role users receive after passing captcha.\n"
             "**2.** `/config admin role:@Moderators action:add` — let a role manage Authix.\n"
             "**3.** `/config panel` — post the verification panel in the current channel.\n"
-            "**4.** `/config stats` — in-Discord dashboard of verifications, failures, and rate-limited users.\n\n"
+            "**4.** `/config stats` — in-Discord dashboard of verifications, failures, and rate-limited users.\n"
+            "**5.** `/config digest channel:#admin-log` — post the stats embed every Monday ~09:00 UTC.\n\n"
             "**Premium**\n"
             "• `/customization` — custom embed title, body, footer, and image."
         ),
