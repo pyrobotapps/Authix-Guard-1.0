@@ -54,6 +54,10 @@ async def get_guild_config(guild_id: int) -> dict:
             "alert_threshold": 40,       # percent
             "alert_min_attempts": 5,     # in the alert window
             "last_alert_ts": None,
+            "auto_mitigate": False,
+            "mitigation_max": 1,         # rate-limit cap during mitigation
+            "mitigation_duration": 3600, # seconds
+            "mitigation_active_until": None,
             "embed": {
                 "title": "Server Verification",
                 "body": "Click the button below and solve the captcha to gain access to this server.",
@@ -82,26 +86,37 @@ RATE_LIMIT_MAX = 3           # attempts
 RATE_LIMIT_WINDOW = 3600     # seconds (1 hour)
 
 
+async def get_effective_rate_limit(guild_id: int) -> tuple[int, bool]:
+    """Return (max_attempts, mitigation_active) for this guild."""
+    cfg = await db.guild_configs.find_one(
+        {"guild_id": str(guild_id)},
+        {"_id": 0, "mitigation_max": 1, "mitigation_active_until": 1},
+    ) or {}
+    until = cfg.get("mitigation_active_until")
+    if until and int(until) > int(time.time()):
+        return int(cfg.get("mitigation_max", 1)), True
+    return RATE_LIMIT_MAX, False
+
+
 async def check_and_record_attempt(guild_id: int, user_id: int) -> tuple[bool, int, int]:
     """
     Returns (allowed, remaining_after, retry_after_seconds).
 
-    - allowed=True  -> the attempt was recorded; remaining_after is the remaining attempts
-                       the user has left in the current window (after this one).
-    - allowed=False -> the user is over the limit; retry_after_seconds tells them when
-                       the oldest attempt in the window expires.
+    Honors per-guild mitigation: if mitigation is active for this guild,
+    a tighter cap (mitigation_max, default 1) is used instead of RATE_LIMIT_MAX.
     """
     now = int(time.time())
     cutoff = now - RATE_LIMIT_WINDOW
     key = f"{guild_id}:{user_id}"
 
+    max_attempts, _mitigating = await get_effective_rate_limit(guild_id)
+
     doc = await db.captcha_attempts.find_one({"_id": key}, {"_id": 0, "attempts": 1})
     attempts = [t for t in (doc or {}).get("attempts", []) if t > cutoff]
 
-    if len(attempts) >= RATE_LIMIT_MAX:
+    if len(attempts) >= max_attempts:
         oldest = min(attempts)
         retry_after = max(1, (oldest + RATE_LIMIT_WINDOW) - now)
-        # Persist the pruned list so the doc doesn't grow forever
         await db.captcha_attempts.update_one(
             {"_id": key}, {"$set": {"attempts": attempts}}, upsert=True
         )
@@ -111,7 +126,7 @@ async def check_and_record_attempt(guild_id: int, user_id: int) -> tuple[bool, i
     await db.captcha_attempts.update_one(
         {"_id": key}, {"$set": {"attempts": attempts}}, upsert=True
     )
-    return True, RATE_LIMIT_MAX - len(attempts), 0
+    return True, max_attempts - len(attempts), 0
 
 
 def _format_retry(seconds: int) -> str:
@@ -321,30 +336,49 @@ async def raid_alert_loop():
             value=f"`{distinct_failing_users}`",
             inline=True,
         )
-        embed.add_field(
-            name="What to do",
-            value=(
-                "• Consider raising the slowmode in your verification channel.\n"
-                "• Lower the rate limit (currently 3/hour) by tightening "
-                "`RATE_LIMIT_MAX` in the bot config.\n"
-                "• Review your audit log for suspicious account-creation patterns."
-            ),
-            inline=False,
-        )
+
+        # ---- Auto-mitigation ----
+        mitigation_update = {}
+        if cfg.get("auto_mitigate"):
+            duration = int(cfg.get("mitigation_duration", 3600))
+            mit_max = int(cfg.get("mitigation_max", 1))
+            mitigation_update["mitigation_active_until"] = now_ts + duration
+            embed.add_field(
+                name="🛡️ Auto-mitigation activated",
+                value=(
+                    f"Rate limit tightened to **{mit_max}/hour** for the next "
+                    f"**{duration // 60} minutes**. New verification attempts beyond "
+                    "that cap will be blocked automatically."
+                ),
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="What to do",
+                value=(
+                    "• Consider raising the slowmode in your verification channel.\n"
+                    "• Enable auto-mitigation: `/config alerts auto_mitigate:True`.\n"
+                    "• Review your audit log for suspicious account-creation patterns."
+                ),
+                inline=False,
+            )
         embed.set_footer(text="Powered by Authix · alerts cool down for 30 min")
 
         try:
             await channel.send(embed=embed)
+            update_doc = {"last_alert_ts": now_ts}
+            update_doc.update(mitigation_update)
             await db.guild_configs.update_one(
                 {"guild_id": gid_str},
-                {"$set": {"last_alert_ts": now_ts}},
+                {"$set": update_doc},
             )
             log.info(
-                "Posted raid alert to guild %s / channel %s (rate=%.1f%% failures=%d)",
+                "Posted raid alert to guild %s / channel %s (rate=%.1f%% failures=%d, mitigation=%s)",
                 guild_id,
                 channel_id,
                 rate,
                 failures,
+                bool(mitigation_update),
             )
         except discord.Forbidden:
             log.warning(
@@ -505,15 +539,21 @@ class VerifyView(discord.ui.View):
                 )
                 return
 
-        # Rate limit: max 3 captcha attempts per user per hour per guild.
+        # Rate limit: cap is 3/hour normally, drops to mitigation_max during raids.
         allowed, remaining, retry_after = await check_and_record_attempt(
             interaction.guild_id, interaction.user.id
         )
+        max_attempts, mitigating = await get_effective_rate_limit(interaction.guild_id)
         if not allowed:
+            extra = (
+                "\n*Raid mitigation is active — limits are temporarily tightened.*"
+                if mitigating
+                else ""
+            )
             await interaction.response.send_message(
                 f"You've reached the verification attempt limit "
-                f"({RATE_LIMIT_MAX} per hour). Please try again in "
-                f"**{_format_retry(retry_after)}**.",
+                f"({max_attempts} per hour). Please try again in "
+                f"**{_format_retry(retry_after)}**.{extra}",
                 ephemeral=True,
             )
             return
@@ -532,7 +572,16 @@ class VerifyView(discord.ui.View):
             color=0x00D2FF,
         )
         embed.set_image(url="attachment://captcha.png")
-        footer = f"Powered by Authix · {remaining} attempt{'s' if remaining != 1 else ''} left this hour"
+        if mitigating:
+            footer = (
+                f"Powered by Authix · Raid mitigation active · "
+                f"{remaining} attempt{'s' if remaining != 1 else ''} left this hour"
+            )
+        else:
+            footer = (
+                f"Powered by Authix · "
+                f"{remaining} attempt{'s' if remaining != 1 else ''} left this hour"
+            )
         embed.set_footer(text=footer)
 
         view = EnterCodeView(code=code, owner_id=interaction.user.id)
@@ -705,6 +754,18 @@ async def build_stats_embed(
         if len(recent) >= RATE_LIMIT_MAX:
             rate_limited += 1
 
+    # Mitigation status
+    cfg = await db.guild_configs.find_one(
+        {"guild_id": gid},
+        {"_id": 0, "mitigation_active_until": 1, "mitigation_max": 1, "auto_mitigate": 1},
+    ) or {}
+    mit_until = cfg.get("mitigation_active_until")
+    mitigating = bool(mit_until and int(mit_until) > now)
+    mit_max = int(cfg.get("mitigation_max", 1))
+    mit_minutes_left = (
+        max(0, (int(mit_until) - now) // 60) if mitigating else 0
+    )
+
     title = f"{title_prefix}Authix — Server Stats" if title_prefix else "Authix — Server Stats"
     embed = discord.Embed(
         title=title,
@@ -733,6 +794,15 @@ async def build_stats_embed(
         ),
         inline=False,
     )
+    if mitigating:
+        embed.add_field(
+            name="🛡️ Auto-mitigation active",
+            value=(
+                f"Rate limit tightened to **{mit_max}/hour** for "
+                f"**{mit_minutes_left} more minute{'s' if mit_minutes_left != 1 else ''}**."
+            ),
+            inline=False,
+        )
     embed.set_footer(text="Powered by Authix")
     return embed
 
@@ -797,12 +867,16 @@ ALERT_COOLDOWN_SECONDS = 30 * 60  # don't re-alert the same guild within 30 min
     channel="Channel to receive raid alerts. Leave empty to disable.",
     threshold="Failure-rate percent that triggers an alert (default 40, range 10-95).",
     min_attempts="Minimum attempts in the last 30 min before an alert can fire (default 5).",
+    auto_mitigate=(
+        "Automatically tighten rate limits to 1/hour for 60 min when an alert fires."
+    ),
 )
 async def config_alerts(
     interaction: discord.Interaction,
     channel: Optional[discord.TextChannel] = None,
     threshold: Optional[int] = None,
     min_attempts: Optional[int] = None,
+    auto_mitigate: Optional[bool] = None,
 ):
     if not await has_admin_permission(interaction):
         await interaction.response.send_message(
@@ -812,7 +886,12 @@ async def config_alerts(
 
     cfg = await get_guild_config(interaction.guild_id)
 
-    if channel is None and threshold is None and min_attempts is None:
+    if (
+        channel is None
+        and threshold is None
+        and min_attempts is None
+        and auto_mitigate is None
+    ):
         cfg["alert_channel_id"] = None
         await save_guild_config(interaction.guild_id, cfg)
         await interaction.response.send_message(
@@ -848,6 +927,9 @@ async def config_alerts(
             return
         cfg["alert_min_attempts"] = min_attempts
 
+    if auto_mitigate is not None:
+        cfg["auto_mitigate"] = bool(auto_mitigate)
+
     await save_guild_config(interaction.guild_id, cfg)
 
     target = (
@@ -856,11 +938,13 @@ async def config_alerts(
         else None
     )
     target_str = target.mention if target else "*(no channel set — alerts will not fire)*"
+    mitigate_str = "✅ enabled (1/hour for 60 min)" if cfg.get("auto_mitigate") else "❌ disabled"
     await interaction.response.send_message(
         f"Raid alerts updated.\n"
         f"• Channel: {target_str}\n"
         f"• Threshold: **{cfg.get('alert_threshold', 40)}%** failure rate\n"
         f"• Minimum attempts: **{cfg.get('alert_min_attempts', 5)}** in last 30 min\n"
+        f"• Auto-mitigation: **{mitigate_str}**\n"
         f"• Cooldown between alerts: 30 min",
         ephemeral=True,
     )
