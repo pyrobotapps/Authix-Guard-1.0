@@ -62,6 +62,44 @@ export default function Premium() {
               </span>
               <span className="mono text-sm text-zinc-400">via Discord</span>
             </div>
+
+            <div
+              data-testid="premium-billing-options"
+              className="grid grid-cols-2 gap-3 mb-6"
+            >
+              <div
+                data-testid="plan-monthly"
+                className="rounded-lg border border-white/10 bg-black/40 p-4"
+              >
+                <div className="mono text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1">
+                  Monthly
+                </div>
+                <div className="chivo text-xl font-bold text-white">
+                  Cancel anytime
+                </div>
+                <div className="mono text-xs text-zinc-500 mt-1">
+                  Best for trying it out
+                </div>
+              </div>
+              <div
+                data-testid="plan-yearly"
+                className="rounded-lg border border-[#00D2FF]/30 bg-[#00D2FF]/5 p-4 relative"
+              >
+                <div className="absolute -top-2 right-3 mono text-[9px] uppercase tracking-[0.2em] px-2 py-0.5 rounded-full bg-[#00E5FF] text-black font-bold">
+                  Save 2 months
+                </div>
+                <div className="mono text-[10px] uppercase tracking-[0.2em] text-[#00E5FF] mb-1">
+                  Yearly
+                </div>
+                <div className="chivo text-xl font-bold text-white">
+                  Best value
+                </div>
+                <div className="mono text-xs text-zinc-400 mt-1">
+                  Two months on the house
+                </div>
+              </div>
+            </div>
+
             <ul className="space-y-3 mono text-sm text-zinc-200">
               {[
                 "Everything in Free",
@@ -82,7 +120,7 @@ export default function Premium() {
               data-testid="premium-cta"
               className="authix-glow-btn mt-8 inline-flex w-full items-center justify-center gap-2 mono font-bold text-black px-6 py-3 rounded-lg bg-gradient-to-r from-[#007AFF] to-[#00E5FF] transition-all"
             >
-              <Crown size={16} /> Upgrade in Discord
+              <Crown size={16} /> Upgrade in Discord — /upgrade
             </a>
           </div>
         </div>

@@ -87,6 +87,11 @@ async def commands():
                 "premium": True,
             },
             {
+                "name": "/upgrade",
+                "description": "Pick a monthly or yearly Premium plan via Discord Monetization.",
+                "premium": False,
+            },
+            {
                 "name": "/help",
                 "description": "Show the Authix setup guide.",
                 "premium": False,

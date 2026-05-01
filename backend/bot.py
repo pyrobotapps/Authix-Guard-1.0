@@ -32,6 +32,11 @@ log = logging.getLogger("authix")
 # ---- Config ----
 BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 PREMIUM_SKU_ID = os.environ.get("DISCORD_PREMIUM_SKU_ID", "")
+PREMIUM_MONTHLY_SKU_ID = os.environ.get("DISCORD_PREMIUM_MONTHLY_SKU_ID", "")
+PREMIUM_YEARLY_SKU_ID = os.environ.get("DISCORD_PREMIUM_YEARLY_SKU_ID", "")
+PREMIUM_SKU_IDS = {
+    s for s in (PREMIUM_SKU_ID, PREMIUM_MONTHLY_SKU_ID, PREMIUM_YEARLY_SKU_ID) if s
+}
 MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
 
@@ -160,13 +165,39 @@ async def has_admin_permission(interaction: discord.Interaction) -> bool:
 
 def has_premium_entitlement(interaction: discord.Interaction) -> bool:
     """Check if the guild has an active premium entitlement via Discord Monetization."""
-    if not PREMIUM_SKU_ID:
-        # No SKU configured yet — allow premium for server owners as fallback
+    if not PREMIUM_SKU_IDS:
+        # No SKUs configured yet — allow premium for server owners as fallback (dev convenience).
         return interaction.user.id == interaction.guild.owner_id
     entitlements = getattr(interaction, "entitlements", []) or []
     for ent in entitlements:
-        if str(getattr(ent, "sku_id", "")) == PREMIUM_SKU_ID:
+        if str(getattr(ent, "sku_id", "")) in PREMIUM_SKU_IDS:
             return True
+    return False
+
+
+async def has_active_premium_for_guild(guild_id: int) -> bool:
+    """
+    Strict runtime check used by background tasks.
+    Hits Discord's Entitlements API, scoped to this guild and our SKU set,
+    excluding ended entitlements.
+    """
+    if not PREMIUM_SKU_IDS:
+        # No SKU configured -> nothing premium can run from background.
+        # Server-owner fallback only applies to interaction-time checks.
+        return False
+    try:
+        async for ent in bot.entitlements(
+            guild=discord.Object(id=int(guild_id)),
+            skus=[discord.Object(id=int(sid)) for sid in PREMIUM_SKU_IDS],
+            exclude_ended=True,
+            limit=10,
+        ):
+            if not ent.deleted and str(ent.sku_id) in PREMIUM_SKU_IDS:
+                return True
+    except Exception as e:
+        log.warning("Entitlement check failed for guild %s: %s", guild_id, e)
+        # Fail-closed: if we can't verify, don't act on a premium-only path.
+        return False
     return False
 
 
@@ -289,6 +320,13 @@ async def raid_alert_loop():
         last_alert = int(cfg.get("last_alert_ts") or 0)
 
         if now_ts - last_alert < ALERT_COOLDOWN_SECONDS:
+            continue
+
+        # Strict runtime entitlement check — alerts are a Premium feature.
+        if not await has_active_premium_for_guild(guild_id):
+            log.info(
+                "Skipping alert for guild %s: no active premium entitlement", guild_id
+            )
             continue
 
         gid_str = str(guild_id)
@@ -887,8 +925,8 @@ async def config_alerts(
     if not has_premium_entitlement(interaction):
         await interaction.response.send_message(
             "**Raid alerts are a Premium feature.**\n"
-            "Upgrade to Authix Premium in the bot profile or via the Monetization tab "
-            "to unlock real-time raid detection and auto-mitigation.",
+            "Run `/upgrade` to pick a monthly or yearly plan and unlock real-time raid "
+            "detection and auto-mitigation.",
             ephemeral=True,
         )
         return
@@ -962,6 +1000,72 @@ async def config_alerts(
 bot.tree.add_command(config_group)
 
 
+# ---- /upgrade ----
+@bot.tree.command(
+    name="upgrade",
+    description="Upgrade to Authix Premium — pick monthly or yearly billing.",
+)
+async def upgrade(interaction: discord.Interaction):
+    # If they're already premium, tell them and skip the buttons.
+    if has_premium_entitlement(interaction):
+        await interaction.response.send_message(
+            "✅ This server already has **Authix Premium** active.\n"
+            "Manage your subscription from Discord → Server Settings → Apps → Authix.",
+            ephemeral=True,
+        )
+        return
+
+    if not (PREMIUM_MONTHLY_SKU_ID or PREMIUM_YEARLY_SKU_ID or PREMIUM_SKU_ID):
+        await interaction.response.send_message(
+            "Premium plans aren't configured for Authix yet. Please check back soon.",
+            ephemeral=True,
+        )
+        return
+
+    view = discord.ui.View(timeout=300)
+    if PREMIUM_MONTHLY_SKU_ID:
+        view.add_item(
+            discord.ui.Button(
+                style=discord.ButtonStyle.premium,
+                sku_id=int(PREMIUM_MONTHLY_SKU_ID),
+            )
+        )
+    if PREMIUM_YEARLY_SKU_ID:
+        view.add_item(
+            discord.ui.Button(
+                style=discord.ButtonStyle.premium,
+                sku_id=int(PREMIUM_YEARLY_SKU_ID),
+            )
+        )
+    # Backwards-compat: if only the legacy single SKU is set, surface it too.
+    if (
+        PREMIUM_SKU_ID
+        and PREMIUM_SKU_ID != PREMIUM_MONTHLY_SKU_ID
+        and PREMIUM_SKU_ID != PREMIUM_YEARLY_SKU_ID
+    ):
+        view.add_item(
+            discord.ui.Button(
+                style=discord.ButtonStyle.premium,
+                sku_id=int(PREMIUM_SKU_ID),
+            )
+        )
+
+    embed = discord.Embed(
+        title="Upgrade to Authix Premium",
+        description=(
+            "Unlock the full security stack:\n"
+            "• `/customization` — custom embed branding\n"
+            "• `/config alerts` — real-time raid alerts + auto-mitigation\n"
+            "• Priority captcha generation\n\n"
+            "Pick a plan below. Billing is handled by Discord."
+        ),
+        color=0x00D2FF,
+    )
+    embed.set_footer(text="Powered by Authix · Cancel anytime in Discord")
+
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
 # ---- /customization (Premium) ----
 @bot.tree.command(
     name="customization",
@@ -991,8 +1095,8 @@ async def customization(
         try:
             await interaction.response.send_message(
                 "**Customization is a Premium feature.**\n"
-                "Upgrade to Authix Premium in the bot profile or via the Monetization tab "
-                "to unlock custom embed title, body, footer, and image.",
+                "Run `/upgrade` to pick a monthly or yearly plan and unlock custom embed "
+                "title, body, footer, and image.",
                 ephemeral=True,
             )
         except Exception:
@@ -1031,7 +1135,8 @@ async def help_cmd(interaction: discord.Interaction):
             "**5.** `/config digest channel:#admin-log` — post the stats embed every Monday ~09:00 UTC.\n\n"
             "**Premium**\n"
             "• `/config alerts channel:#admin-log` — real-time raid alert when failure rate spikes.\n"
-            "• `/customization` — custom embed title, body, footer, and image."
+            "• `/customization` — custom embed title, body, footer, and image.\n"
+            "• `/upgrade` — pick a monthly or yearly Premium plan."
         ),
         color=0x00D2FF,
     )
