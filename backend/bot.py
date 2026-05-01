@@ -29,6 +29,51 @@ logging.basicConfig(
 )
 log = logging.getLogger("authix")
 
+
+# ---- Secret redaction on log output ----
+# Any log line containing a configured secret will have the secret replaced with
+# [REDACTED] before it is emitted. Applied to both our logger and discord.py's.
+class _SecretRedactFilter(logging.Filter):
+    def __init__(self):
+        super().__init__()
+        self._secrets: list[str] = []
+
+    def refresh(self):
+        raw = [
+            os.environ.get(k, "")
+            for k in (
+                "DISCORD_BOT_TOKEN",
+                "DISCORD_CLIENT_SECRET",
+                "MONGO_URL",
+                "DISCORD_PREMIUM_SKU_ID",
+                "DISCORD_PREMIUM_MONTHLY_SKU_ID",
+                "DISCORD_PREMIUM_YEARLY_SKU_ID",
+            )
+        ]
+        self._secrets = sorted(
+            {s for s in raw if s and len(s) >= 8}, key=len, reverse=True
+        )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        redacted = msg
+        for s in self._secrets:
+            if s and s in redacted:
+                redacted = redacted.replace(s, "[REDACTED]")
+        if redacted != msg:
+            record.msg = redacted
+            record.args = None
+        return True
+
+
+_redact = _SecretRedactFilter()
+_redact.refresh()
+for _name in ("", "authix", "discord", "discord.gateway", "discord.client", "discord.http"):
+    logging.getLogger(_name).addFilter(_redact)
+
 # ---- Config ----
 BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 PREMIUM_SKU_ID = os.environ.get("DISCORD_PREMIUM_SKU_ID", "")
@@ -123,13 +168,17 @@ async def check_and_record_attempt(guild_id: int, user_id: int) -> tuple[bool, i
         oldest = min(attempts)
         retry_after = max(1, (oldest + RATE_LIMIT_WINDOW) - now)
         await db.captcha_attempts.update_one(
-            {"_id": key}, {"$set": {"attempts": attempts}}, upsert=True
+            {"_id": key},
+            {"$set": {"attempts": attempts, "updated_at": datetime.now(timezone.utc)}},
+            upsert=True,
         )
         return False, 0, retry_after
 
     attempts.append(now)
     await db.captcha_attempts.update_one(
-        {"_id": key}, {"$set": {"attempts": attempts}}, upsert=True
+        {"_id": key},
+        {"$set": {"attempts": attempts, "updated_at": datetime.now(timezone.utc)}},
+        upsert=True,
     )
     return True, max_attempts - len(attempts), 0
 
@@ -150,6 +199,7 @@ async def record_verification_event(guild_id: int, user_id: int, outcome: str) -
             "user_id": str(user_id),
             "outcome": outcome,
             "ts": int(time.time()),
+            "created_at": datetime.now(timezone.utc),
         }
     )
 
@@ -240,6 +290,17 @@ async def on_ready():
         {"$set": {"servers_protected": len(bot.guilds)}},
         upsert=True,
     )
+    # TTL indexes: enforce the 30-day retention promise from the Privacy Policy.
+    try:
+        await db.verification_events.create_index(
+            "created_at", expireAfterSeconds=30 * 24 * 3600
+        )
+        await db.captcha_attempts.create_index(
+            "updated_at", expireAfterSeconds=30 * 24 * 3600
+        )
+        log.info("Ensured TTL indexes on verification_events and captcha_attempts")
+    except Exception as e:
+        log.warning("Failed to create TTL indexes: %s", e)
     if not weekly_digest_loop.is_running():
         weekly_digest_loop.start()
     if not raid_alert_loop.is_running():

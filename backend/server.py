@@ -122,12 +122,19 @@ async def commands():
 
 app.include_router(api_router)
 
+# CORS: public, no auth cookies. Origins come from env so you can lock this down
+# to your deployed domain after launch. allow_credentials is explicitly False
+# because Authix has no session cookies — there's nothing to protect with CORS
+# credentials.
+_cors_env = os.environ.get("CORS_ORIGINS", "*").strip()
+_allow_origins = ["*"] if _cors_env == "*" else [o.strip() for o in _cors_env.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
-    allow_methods=["*"],
+    allow_credentials=False,
+    allow_origins=_allow_origins,
+    allow_methods=["GET", "OPTIONS"],
     allow_headers=["*"],
+    max_age=600,
 )
 
 logging.basicConfig(
