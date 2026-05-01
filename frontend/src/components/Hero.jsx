@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { ShieldCheck, Sparkles } from "lucide-react";
 import AuthixLogo from "@/components/AuthixLogo";
+import useInstallUrl from "@/hooks/useInstallUrl";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function Hero() {
+  const installUrl = useInstallUrl();
   const [stats, setStats] = useState({
     servers_protected: 0,
     users_verified: 0,
@@ -61,14 +63,20 @@ export default function Hero() {
           <div className="flex flex-col sm:flex-row gap-4 mt-2">
             <a
               id="cta"
-              href="https://discord.com/oauth2/authorize?client_id=1499517686160556192&permissions=8&integration_type=0&scope=bot"
+              href={installUrl || "#"}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => {
+                if (!installUrl) e.preventDefault();
+              }}
+              aria-disabled={!installUrl}
               data-testid="hero-add-to-discord"
-              className="authix-glow-btn mono font-bold text-black px-7 py-3.5 rounded-lg bg-gradient-to-r from-[#007AFF] to-[#00E5FF] flex items-center justify-center gap-2 transition-all"
+              className={`authix-glow-btn mono font-bold text-black px-7 py-3.5 rounded-lg bg-gradient-to-r from-[#007AFF] to-[#00E5FF] flex items-center justify-center gap-2 transition-all ${
+                !installUrl ? "opacity-60 cursor-not-allowed" : ""
+              }`}
             >
               <ShieldCheck size={18} />
-              Add Authix to Discord
+              {installUrl ? "Add Authix to Discord" : "Loading…"}
             </a>
             <a
               href="#how"

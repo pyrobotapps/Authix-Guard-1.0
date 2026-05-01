@@ -2,12 +2,14 @@ import { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import AuthixLogo from "@/components/AuthixLogo";
+import useInstallUrl from "@/hooks/useInstallUrl";
 
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const installUrl = useInstallUrl();
   const onHome = location.pathname === "/";
 
   useEffect(() => {
@@ -88,10 +90,17 @@ export default function Navbar() {
 
         <div className="hidden md:flex items-center gap-3">
           <a
-            href="/#cta"
-            onClick={(e) => goToSection(e, "#cta")}
+            href={installUrl || "#"}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => {
+              if (!installUrl) e.preventDefault();
+            }}
+            aria-disabled={!installUrl}
             data-testid="navbar-add-to-discord"
-            className="authix-glow-btn mono text-sm font-bold px-5 py-2.5 rounded-lg bg-gradient-to-r from-[#007AFF] to-[#00E5FF] text-black transition-all"
+            className={`authix-glow-btn mono text-sm font-bold px-5 py-2.5 rounded-lg bg-gradient-to-r from-[#007AFF] to-[#00E5FF] text-black transition-all ${
+              !installUrl ? "opacity-60 cursor-not-allowed" : ""
+            }`}
           >
             Add to Discord
           </a>
@@ -127,9 +136,16 @@ export default function Navbar() {
               Docs
             </Link>
             <a
-              href="/#cta"
-              onClick={(e) => goToSection(e, "#cta")}
-              className="authix-glow-btn mono text-sm font-bold px-5 py-2.5 rounded-lg bg-gradient-to-r from-[#007AFF] to-[#00E5FF] text-black text-center"
+              href={installUrl || "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => {
+                if (!installUrl) e.preventDefault();
+                setOpen(false);
+              }}
+              className={`authix-glow-btn mono text-sm font-bold px-5 py-2.5 rounded-lg bg-gradient-to-r from-[#007AFF] to-[#00E5FF] text-black text-center ${
+                !installUrl ? "opacity-60 pointer-events-none" : ""
+              }`}
             >
               Add to Discord
             </a>

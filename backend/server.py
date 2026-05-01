@@ -46,6 +46,26 @@ async def stats():
     }
 
 
+# Permissions Authix needs: Manage Roles + View Channel + Send Messages
+# + Embed Links + Attach Files + Read Message History
+_AUTHIX_PERMISSIONS = 268553216
+
+
+@api_router.get("/install-url")
+async def install_url():
+    """Return the Discord OAuth install URL for the bot (public info)."""
+    client_id = os.environ.get("DISCORD_CLIENT_ID", "")
+    if not client_id:
+        return {"url": None, "configured": False}
+    url = (
+        f"https://discord.com/oauth2/authorize"
+        f"?client_id={client_id}"
+        f"&permissions={_AUTHIX_PERMISSIONS}"
+        f"&scope=bot+applications.commands"
+    )
+    return {"url": url, "configured": True}
+
+
 @api_router.get("/commands")
 async def commands():
     """Commands reference consumed by the landing page."""

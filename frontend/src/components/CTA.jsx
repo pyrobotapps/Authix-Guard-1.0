@@ -1,7 +1,9 @@
 import AuthixLogo from "@/components/AuthixLogo";
 import { ShieldCheck } from "lucide-react";
+import useInstallUrl from "@/hooks/useInstallUrl";
 
 export default function CTA() {
+  const installUrl = useInstallUrl();
   return (
     <section
       data-testid="cta-section"
@@ -25,13 +27,19 @@ export default function CTA() {
             Install Authix, configure a verified role, post the panel. You&apos;re done.
           </p>
           <a
-            href="https://discord.com/oauth2/authorize"
+            href={installUrl || "#"}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={(e) => {
+              if (!installUrl) e.preventDefault();
+            }}
+            aria-disabled={!installUrl}
             data-testid="final-cta-button"
-            className="authix-glow-btn inline-flex items-center gap-2 mono font-bold text-black px-7 py-3.5 rounded-lg bg-gradient-to-r from-[#007AFF] to-[#00E5FF] transition-all"
+            className={`authix-glow-btn inline-flex items-center gap-2 mono font-bold text-black px-7 py-3.5 rounded-lg bg-gradient-to-r from-[#007AFF] to-[#00E5FF] transition-all ${
+              !installUrl ? "opacity-60 cursor-not-allowed" : ""
+            }`}
           >
-            <ShieldCheck size={18} /> Add Authix to Discord
+            <ShieldCheck size={18} /> {installUrl ? "Add Authix to Discord" : "Loading…"}
           </a>
         </div>
       </div>

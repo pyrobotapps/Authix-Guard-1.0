@@ -1,7 +1,9 @@
 import { Crown, Check, Sparkles } from "lucide-react";
 import { SectionHeader } from "@/components/Features";
+import useInstallUrl from "@/hooks/useInstallUrl";
 
 export default function Premium() {
+  const installUrl = useInstallUrl();
   return (
     <section
       id="premium"
@@ -116,11 +118,20 @@ export default function Premium() {
               ))}
             </ul>
             <a
-              href="#cta"
+              href={installUrl || "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => {
+                if (!installUrl) e.preventDefault();
+              }}
+              aria-disabled={!installUrl}
               data-testid="premium-cta"
-              className="authix-glow-btn mt-8 inline-flex w-full items-center justify-center gap-2 mono font-bold text-black px-6 py-3 rounded-lg bg-gradient-to-r from-[#007AFF] to-[#00E5FF] transition-all"
+              className={`authix-glow-btn mt-8 inline-flex w-full items-center justify-center gap-2 mono font-bold text-black px-6 py-3 rounded-lg bg-gradient-to-r from-[#007AFF] to-[#00E5FF] transition-all ${
+                !installUrl ? "opacity-60 cursor-not-allowed" : ""
+              }`}
             >
-              <Crown size={16} /> Upgrade in Discord — /upgrade
+              <Crown size={16} />{" "}
+              {installUrl ? "Add Authix, then run /upgrade" : "Loading…"}
             </a>
           </div>
         </div>
