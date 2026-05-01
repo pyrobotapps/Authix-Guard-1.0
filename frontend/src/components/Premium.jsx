@@ -72,7 +72,7 @@ export default function Premium() {
                 className="rounded-lg border border-white/10 bg-black/40 p-4"
               >
                 <div className="mono text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1">
-                  Monthly
+                  $4.98 Monthly
                 </div>
                 <div className="chivo text-xl font-bold text-white">
                   Cancel anytime
@@ -89,7 +89,7 @@ export default function Premium() {
                   Save 2 months
                 </div>
                 <div className="mono text-[10px] uppercase tracking-[0.2em] text-[#00E5FF] mb-1">
-                  Yearly
+                  $49.80 Yearly
                 </div>
                 <div className="chivo text-xl font-bold text-white">
                   Best value

@@ -73,7 +73,7 @@ async def commands():
             },
             {
                 "name": "/config digest",
-                "description": "Auto-post the stats embed to a channel every Monday ~09:00 UTC.",
+                "description": "Auto-post the stats embed to a channel every Monday ~09:00 UTC (4:00 AM EST).",
                 "premium": False,
             },
             {

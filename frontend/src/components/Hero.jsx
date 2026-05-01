@@ -61,7 +61,7 @@ export default function Hero() {
           <div className="flex flex-col sm:flex-row gap-4 mt-2">
             <a
               id="cta"
-              href="https://discord.com/oauth2/authorize"
+              href="https://discord.com/oauth2/authorize?client_id=1499517686160556192&permissions=8&integration_type=0&scope=bot"
               target="_blank"
               rel="noopener noreferrer"
               data-testid="hero-add-to-discord"

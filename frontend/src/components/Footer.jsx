@@ -16,17 +16,17 @@ export default function Footer() {
           <FooterCol
             title="Product"
             links={[
-              { label: "Features", href: "#features" },
-              { label: "How it works", href: "#how" },
-              { label: "Commands", href: "#commands" },
-              { label: "Premium", href: "#premium" },
+              { label: "Features", href: "/#features" },
+              { label: "How it works", href: "/#how" },
+              { label: "Commands", href: "/#commands" },
+              { label: "Premium", href: "/#premium" },
             ]}
           />
           <FooterCol
             title="Resources"
             links={[
               { label: "Docs", to: "/docs" },
-              { label: "Support", href: "#cta" },
+              { label: "Support", href: "/#cta" },
               { label: "Discord", href: "https://discord.com" },
             ]}
           />
