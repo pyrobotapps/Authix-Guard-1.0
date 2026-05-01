@@ -861,7 +861,7 @@ ALERT_COOLDOWN_SECONDS = 30 * 60  # don't re-alert the same guild within 30 min
 
 @config_group.command(
     name="alerts",
-    description="Configure real-time raid alerts when captcha failure rate spikes.",
+    description="[PREMIUM] Real-time raid alerts when captcha failure rate spikes.",
 )
 @app_commands.describe(
     channel="Channel to receive raid alerts. Leave empty to disable.",
@@ -881,6 +881,15 @@ async def config_alerts(
     if not await has_admin_permission(interaction):
         await interaction.response.send_message(
             "You don't have permission to use this command.", ephemeral=True
+        )
+        return
+
+    if not has_premium_entitlement(interaction):
+        await interaction.response.send_message(
+            "**Raid alerts are a Premium feature.**\n"
+            "Upgrade to Authix Premium in the bot profile or via the Monetization tab "
+            "to unlock real-time raid detection and auto-mitigation.",
+            ephemeral=True,
         )
         return
 
@@ -1019,9 +1028,9 @@ async def help_cmd(interaction: discord.Interaction):
             "**2.** `/config admin role:@Moderators action:add` — let a role manage Authix.\n"
             "**3.** `/config panel` — post the verification panel in the current channel.\n"
             "**4.** `/config stats` — in-Discord dashboard of verifications, failures, and rate-limited users.\n"
-            "**5.** `/config digest channel:#admin-log` — post the stats embed every Monday ~09:00 UTC.\n"
-            "**6.** `/config alerts channel:#admin-log` — real-time raid alert when failure rate spikes.\n\n"
+            "**5.** `/config digest channel:#admin-log` — post the stats embed every Monday ~09:00 UTC.\n\n"
             "**Premium**\n"
+            "• `/config alerts channel:#admin-log` — real-time raid alert when failure rate spikes.\n"
             "• `/customization` — custom embed title, body, footer, and image."
         ),
         color=0x00D2FF,

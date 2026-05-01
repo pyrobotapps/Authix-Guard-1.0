@@ -67,6 +67,7 @@ export default function Premium() {
                 "Everything in Free",
                 "Custom embed title, body & footer",
                 "Custom embed image / banner URL",
+                "Real-time raid alerts + auto-mitigation",
                 "Priority captcha generation",
                 "Premium badge on your verification panel",
               ].map((f) => (
