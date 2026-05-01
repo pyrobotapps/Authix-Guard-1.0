@@ -77,6 +77,11 @@ async def commands():
                 "premium": False,
             },
             {
+                "name": "/config alerts",
+                "description": "Real-time raid alert when captcha failure rate spikes above your threshold.",
+                "premium": False,
+            },
+            {
                 "name": "/customization",
                 "description": "Customize the embed title, body, footer, and image.",
                 "premium": True,

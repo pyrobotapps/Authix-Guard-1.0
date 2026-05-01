@@ -50,6 +50,10 @@ async def get_guild_config(guild_id: int) -> dict:
             "admin_role_ids": [],
             "digest_channel_id": None,
             "last_digest_ts": None,
+            "alert_channel_id": None,
+            "alert_threshold": 40,       # percent
+            "alert_min_attempts": 5,     # in the alert window
+            "last_alert_ts": None,
             "embed": {
                 "title": "Server Verification",
                 "body": "Click the button below and solve the captcha to gain access to this server.",
@@ -192,6 +196,8 @@ async def on_ready():
     )
     if not weekly_digest_loop.is_running():
         weekly_digest_loop.start()
+    if not raid_alert_loop.is_running():
+        raid_alert_loop.start()
 
 
 # ---- Weekly digest ----
@@ -245,6 +251,113 @@ async def weekly_digest_loop():
 
 @weekly_digest_loop.before_loop
 async def _before_digest_loop():
+    await bot.wait_until_ready()
+
+
+# ---- Raid alert loop ----
+# Fires every 5 min. For each guild with alert_channel_id set, checks the last
+# 30 min of verification events. If failures >= alert_min_attempts AND
+# failure_rate >= alert_threshold AND we haven't alerted in the cooldown window,
+# posts an alert and stamps last_alert_ts.
+@tasks.loop(minutes=5)
+async def raid_alert_loop():
+    now_ts = int(time.time())
+    window_start = now_ts - ALERT_WINDOW_SECONDS
+
+    async for cfg in db.guild_configs.find(
+        {"alert_channel_id": {"$ne": None}}, {"_id": 0}
+    ):
+        guild_id = int(cfg["guild_id"])
+        channel_id = int(cfg["alert_channel_id"])
+        threshold = int(cfg.get("alert_threshold", 40))
+        min_attempts = int(cfg.get("alert_min_attempts", 5))
+        last_alert = int(cfg.get("last_alert_ts") or 0)
+
+        if now_ts - last_alert < ALERT_COOLDOWN_SECONDS:
+            continue
+
+        gid_str = str(guild_id)
+        successes = await db.verification_events.count_documents(
+            {"guild_id": gid_str, "outcome": "success", "ts": {"$gte": window_start}}
+        )
+        failures = await db.verification_events.count_documents(
+            {"guild_id": gid_str, "outcome": "failure", "ts": {"$gte": window_start}}
+        )
+        total = successes + failures
+        if total < min_attempts:
+            continue
+        rate = (failures / total) * 100
+        if rate < threshold:
+            continue
+
+        guild = bot.get_guild(guild_id)
+        if not guild:
+            continue
+        channel = guild.get_channel(channel_id)
+        if not channel:
+            log.warning("Alert channel missing for guild %s", guild_id)
+            continue
+
+        # Count distinct users that failed in the window — useful raid signal
+        distinct_failing_users = len(
+            await db.verification_events.distinct(
+                "user_id",
+                {"guild_id": gid_str, "outcome": "failure", "ts": {"$gte": window_start}},
+            )
+        )
+
+        embed = discord.Embed(
+            title="🚨 Possible raid in progress",
+            description=(
+                f"Captcha failure rate is **{rate:.1f}%** in the last 30 minutes — "
+                f"above the configured **{threshold}%** threshold."
+            ),
+            color=0xFF3B30,
+        )
+        embed.add_field(name="Failures", value=f"`{failures}`", inline=True)
+        embed.add_field(name="Successes", value=f"`{successes}`", inline=True)
+        embed.add_field(
+            name="Distinct failing users",
+            value=f"`{distinct_failing_users}`",
+            inline=True,
+        )
+        embed.add_field(
+            name="What to do",
+            value=(
+                "• Consider raising the slowmode in your verification channel.\n"
+                "• Lower the rate limit (currently 3/hour) by tightening "
+                "`RATE_LIMIT_MAX` in the bot config.\n"
+                "• Review your audit log for suspicious account-creation patterns."
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="Powered by Authix · alerts cool down for 30 min")
+
+        try:
+            await channel.send(embed=embed)
+            await db.guild_configs.update_one(
+                {"guild_id": gid_str},
+                {"$set": {"last_alert_ts": now_ts}},
+            )
+            log.info(
+                "Posted raid alert to guild %s / channel %s (rate=%.1f%% failures=%d)",
+                guild_id,
+                channel_id,
+                rate,
+                failures,
+            )
+        except discord.Forbidden:
+            log.warning(
+                "Missing permissions to post alert in guild %s / channel %s",
+                guild_id,
+                channel_id,
+            )
+        except Exception as e:
+            log.exception("Alert post failed for guild %s: %s", guild_id, e)
+
+
+@raid_alert_loop.before_loop
+async def _before_alert_loop():
     await bot.wait_until_ready()
 
 
@@ -671,6 +784,88 @@ async def config_digest(
     )
 
 
+# ---- Raid alerts ----
+ALERT_WINDOW_SECONDS = 30 * 60   # look at the last 30 minutes
+ALERT_COOLDOWN_SECONDS = 30 * 60  # don't re-alert the same guild within 30 min
+
+
+@config_group.command(
+    name="alerts",
+    description="Configure real-time raid alerts when captcha failure rate spikes.",
+)
+@app_commands.describe(
+    channel="Channel to receive raid alerts. Leave empty to disable.",
+    threshold="Failure-rate percent that triggers an alert (default 40, range 10-95).",
+    min_attempts="Minimum attempts in the last 30 min before an alert can fire (default 5).",
+)
+async def config_alerts(
+    interaction: discord.Interaction,
+    channel: Optional[discord.TextChannel] = None,
+    threshold: Optional[int] = None,
+    min_attempts: Optional[int] = None,
+):
+    if not await has_admin_permission(interaction):
+        await interaction.response.send_message(
+            "You don't have permission to use this command.", ephemeral=True
+        )
+        return
+
+    cfg = await get_guild_config(interaction.guild_id)
+
+    if channel is None and threshold is None and min_attempts is None:
+        cfg["alert_channel_id"] = None
+        await save_guild_config(interaction.guild_id, cfg)
+        await interaction.response.send_message(
+            "Raid alerts disabled.", ephemeral=True
+        )
+        return
+
+    if channel is not None:
+        me = interaction.guild.me
+        perms = channel.permissions_for(me)
+        if not (perms.send_messages and perms.embed_links):
+            await interaction.response.send_message(
+                f"I can't post in {channel.mention}. Please grant me **Send Messages** "
+                "and **Embed Links** there, then try again.",
+                ephemeral=True,
+            )
+            return
+        cfg["alert_channel_id"] = str(channel.id)
+
+    if threshold is not None:
+        if threshold < 10 or threshold > 95:
+            await interaction.response.send_message(
+                "Threshold must be between 10 and 95.", ephemeral=True
+            )
+            return
+        cfg["alert_threshold"] = threshold
+
+    if min_attempts is not None:
+        if min_attempts < 1 or min_attempts > 100:
+            await interaction.response.send_message(
+                "min_attempts must be between 1 and 100.", ephemeral=True
+            )
+            return
+        cfg["alert_min_attempts"] = min_attempts
+
+    await save_guild_config(interaction.guild_id, cfg)
+
+    target = (
+        interaction.guild.get_channel(int(cfg["alert_channel_id"]))
+        if cfg.get("alert_channel_id")
+        else None
+    )
+    target_str = target.mention if target else "*(no channel set — alerts will not fire)*"
+    await interaction.response.send_message(
+        f"Raid alerts updated.\n"
+        f"• Channel: {target_str}\n"
+        f"• Threshold: **{cfg.get('alert_threshold', 40)}%** failure rate\n"
+        f"• Minimum attempts: **{cfg.get('alert_min_attempts', 5)}** in last 30 min\n"
+        f"• Cooldown between alerts: 30 min",
+        ephemeral=True,
+    )
+
+
 bot.tree.add_command(config_group)
 
 
@@ -740,7 +935,8 @@ async def help_cmd(interaction: discord.Interaction):
             "**2.** `/config admin role:@Moderators action:add` — let a role manage Authix.\n"
             "**3.** `/config panel` — post the verification panel in the current channel.\n"
             "**4.** `/config stats` — in-Discord dashboard of verifications, failures, and rate-limited users.\n"
-            "**5.** `/config digest channel:#admin-log` — post the stats embed every Monday ~09:00 UTC.\n\n"
+            "**5.** `/config digest channel:#admin-log` — post the stats embed every Monday ~09:00 UTC.\n"
+            "**6.** `/config alerts channel:#admin-log` — real-time raid alert when failure rate spikes.\n\n"
             "**Premium**\n"
             "• `/customization` — custom embed title, body, footer, and image."
         ),
