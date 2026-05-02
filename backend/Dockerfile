@@ -20,7 +20,6 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY . .
 
-ENV PYTHONUNBUFFERED=1
 
 
 # Default = backend service. Bot service overrides this in Railway settings.
