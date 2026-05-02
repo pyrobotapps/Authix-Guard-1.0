@@ -21,8 +21,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 COPY . .
 
 ENV PYTHONUNBUFFERED=1
-ENV PORT=8001
-EXPOSE 8001
+
 
 # Default = backend service. Bot service overrides this in Railway settings.
 CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8001}"]
