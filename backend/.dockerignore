@@ -1,0 +1,20 @@
+# Never bake secrets, dev junk, or build cache into the backend image.
+.env
+.env.*
+*.env
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+.pytest_cache
+.coverage
+*.egg-info
+tests/
+test_reports/
+*.log
+.DS_Store
+.git
+.github
+README*.md
+RAILWAY.md

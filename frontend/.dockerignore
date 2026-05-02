@@ -1,0 +1,14 @@
+# Never ship dev junk to the frontend image.
+node_modules
+build
+.env
+.env.*
+*.env
+.cache
+coverage
+*.log
+.DS_Store
+.git
+.github
+README*.md
+.eslintcache
